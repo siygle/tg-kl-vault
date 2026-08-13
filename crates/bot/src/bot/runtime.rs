@@ -105,7 +105,7 @@ async fn handle_command(
     match cmd {
         Command::Start => {
             info!(chat_id = msg.chat.id.0, "/start");
-            bot.send_message(msg.chat.id, "你好，欢迎使用flowerss。")
+            bot.send_message(msg.chat.id, "你好，歡迎使用 flowerss。")
                 .await?;
         }
         Command::Ping => {
@@ -120,7 +120,7 @@ async fn handle_command(
         }
         Command::List => list_subscriptions(&bot, &msg, &state).await?,
         Command::Unsuball => {
-            bot.send_message(msg.chat.id, "是否退订当前用户的所有订阅？")
+            bot.send_message(msg.chat.id, "是否退訂目前使用者的所有訂閱？")
                 .reply_markup(unsuball_confirm_keyboard())
                 .await?;
         }
@@ -161,7 +161,7 @@ async fn handle_subscribe(
     if payload.is_empty() {
         bot.send_message(
             msg.chat.id,
-            "请在命令后带上需要订阅的RSS URL，例如：/sub https://justinpot.com/feed/",
+            "請在指令後帶上需要訂閱的 RSS URL，例如：/sub https://justinpot.com/feed/",
         )
         .await?;
         return Ok(());
@@ -170,7 +170,7 @@ async fn handle_subscribe(
     let source = match create_source(&state.repo, &state.fetcher, payload).await {
         Ok(source) => source,
         Err(err) => {
-            bot.send_message(msg.chat.id, format!("{err}，订阅失败"))
+            bot.send_message(msg.chat.id, format!("{err}，訂閱失敗"))
                 .await?;
             return Ok(());
         }
@@ -185,7 +185,7 @@ async fn handle_subscribe(
         bot.send_message(
             msg.chat.id,
             format!(
-                "[[{}]][{}]({}) 订阅成功",
+                "[[{}]][{}]({}) 訂閱成功",
                 source.id,
                 source.title.as_deref().unwrap_or(payload),
                 source.link.as_deref().unwrap_or(payload)
@@ -195,7 +195,7 @@ async fn handle_subscribe(
         .link_preview_options(no_preview())
         .await?;
     } else {
-        bot.send_message(msg.chat.id, "已订阅该源，请勿重复订阅")
+        bot.send_message(msg.chat.id, "已訂閱該源，請勿重複訂閱")
             .await?;
     }
     Ok(())
@@ -215,14 +215,14 @@ async fn handle_unsubscribe(
             .await
             .map_err(to_request_error)?;
         if sources.is_empty() {
-            bot.send_message(msg.chat.id, "没有订阅").await?;
+            bot.send_message(msg.chat.id, "沒有訂閱").await?;
             return Ok(());
         }
         let items = sources
             .iter()
             .filter_map(|s| Some((s.source_id?, s.title.clone().unwrap_or_default())))
             .collect::<Vec<_>>();
-        bot.send_message(msg.chat.id, "请选择你要退订的源")
+        bot.send_message(msg.chat.id, "請選擇你要退訂的源")
             .reply_markup(feed_item_list_keyboard(
                 crate::bot::callback::Button::UnsubFeedItem,
                 msg.chat.id.0,
@@ -239,7 +239,7 @@ async fn handle_unsubscribe(
         .map_err(to_request_error)?
     {
         None => {
-            bot.send_message(msg.chat.id, "未订阅该RSS源").await?;
+            bot.send_message(msg.chat.id, "未訂閱該 RSS 源").await?;
         }
         Some(source) => {
             if state
@@ -251,7 +251,7 @@ async fn handle_unsubscribe(
                 bot.send_message(
                     msg.chat.id,
                     format!(
-                        "[{}]({}) 退订成功！",
+                        "[{}]({}) 退訂成功！",
                         source.title.as_deref().unwrap_or(""),
                         source.link.as_deref().unwrap_or("")
                     ),
@@ -260,7 +260,7 @@ async fn handle_unsubscribe(
                 .link_preview_options(no_preview())
                 .await?;
             } else {
-                bot.send_message(msg.chat.id, "退订失败").await?;
+                bot.send_message(msg.chat.id, "退訂失敗").await?;
             }
         }
     }
@@ -277,7 +277,7 @@ async fn handle_set_tag(
     let Some(source_id) = parts.next().and_then(|s| s.parse::<i64>().ok()) else {
         bot.send_message(
             msg.chat.id,
-            "/setfeedtag [sourceID] [tag1] [tag2] 设置订阅标签（最多设置三个Tag，以空格分割）",
+            "/setfeedtag [sourceID] [tag1] [tag2] 設定訂閱標籤（最多設定三個Tag，以空格分隔）",
         )
         .await?;
         return Ok(());
@@ -292,9 +292,9 @@ async fn handle_set_tag(
         .await
         .map_err(to_request_error)?
     {
-        bot.send_message(msg.chat.id, "订阅标签设置成功!").await?;
+        bot.send_message(msg.chat.id, "訂閱標籤設定成功!").await?;
     } else {
-        bot.send_message(msg.chat.id, "订阅标签设置失败!").await?;
+        bot.send_message(msg.chat.id, "訂閱標籤設定失敗!").await?;
     }
     Ok(())
 }
@@ -308,14 +308,14 @@ async fn handle_set(bot: &Bot, msg: &Message, state: &BotState) -> ResponseResul
         .await
         .map_err(to_request_error)?;
     if sources.is_empty() {
-        bot.send_message(msg.chat.id, "当前没有订阅").await?;
+        bot.send_message(msg.chat.id, "目前沒有訂閱").await?;
         return Ok(());
     }
     let items = sources
         .iter()
         .filter_map(|s| Some((s.source_id?, s.title.clone().unwrap_or_default())))
         .collect::<Vec<_>>();
-    bot.send_message(msg.chat.id, "请选择你要设置的源")
+    bot.send_message(msg.chat.id, "請選擇你要設定的源")
         .reply_markup(feed_item_list_keyboard(
             crate::bot::callback::Button::SetFeedItem,
             msg.chat.id.0,
@@ -341,13 +341,13 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
         .await
         .map_err(to_request_error)?;
     if sources.is_empty() {
-        bot.send_message(msg.chat.id, "当前没有订阅").await?;
+        bot.send_message(msg.chat.id, "目前沒有訂閱").await?;
         return Ok(());
     }
 
     bot.send_message(
         msg.chat.id,
-        format!("已开始检查当前订阅，共{}个源", sources.len()),
+        format!("已開始檢查目前訂閱，共{}個源", sources.len()),
     )
     .await?;
 
@@ -545,7 +545,7 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
     bot.send_message(
         msg.chat.id,
         format!(
-            "检查完成：新增{}篇，忽略{}篇过旧，{}个源无更新，{}个源失败",
+            "檢查完成：新增{}篇，忽略{}篇過舊，{}個源無更新，{}個源失敗",
             new_count, stale_count, unchanged_count, error_count
         ),
     )
@@ -566,7 +566,7 @@ async fn set_all_sources_update(
     let sources = match state.repo.subscriptions_for_user(msg.chat.id.0).await {
         Ok(sources) => sources,
         Err(_) => {
-            bot.send_message(msg.chat.id, "系统错误").await?;
+            bot.send_message(msg.chat.id, "系統錯誤").await?;
             return Ok(());
         }
     };
@@ -583,9 +583,9 @@ async fn set_all_sources_update(
             bot.send_message(
                 msg.chat.id,
                 if enable {
-                    "激活失败"
+                    "啟用失敗"
                 } else {
-                    "暂停失败"
+                    "暫停失敗"
                 },
             )
             .await?;
@@ -593,9 +593,9 @@ async fn set_all_sources_update(
         }
     }
     let reply = if enable {
-        "订阅已全部开启"
+        "訂閱已全部開啟"
     } else {
-        "订阅已全部暂停"
+        "訂閱已全部暫停"
     };
     bot.send_message(msg.chat.id, reply)
         .parse_mode(ParseMode::Markdown)
@@ -616,7 +616,7 @@ pub async fn export_chat_opml(
         .await
         .map_err(to_request_error)?;
     if sources.is_empty() {
-        bot.send_message(chat_id, "订阅列表为空").await?;
+        bot.send_message(chat_id, "訂閱列表為空").await?;
         return Ok(());
     }
     let opml_sources = sources
@@ -627,14 +627,14 @@ pub async fn export_chat_opml(
         })
         .collect::<Vec<_>>();
     let Ok(opml_text) = export_opml(&opml_sources) else {
-        bot.send_message(chat_id, "导出失败").await?;
+        bot.send_message(chat_id, "匯出失敗").await?;
         return Ok(());
     };
 
     let file_name = format!("subscriptions_{}.opml", now_unix());
     let document = teloxide::types::InputFile::memory(opml_text.into_bytes()).file_name(file_name);
     if bot.send_document(chat_id, document).await.is_err() {
-        bot.send_message(chat_id, "导出失败").await?;
+        bot.send_message(chat_id, "匯出失敗").await?;
     }
     Ok(())
 }
@@ -647,10 +647,10 @@ async fn list_subscriptions(bot: &Bot, msg: &Message, state: &BotState) -> Respo
         .await
         .map_err(to_request_error)?;
     if sources.is_empty() {
-        bot.send_message(msg.chat.id, "订阅列表为空").await?;
+        bot.send_message(msg.chat.id, "訂閱列表為空").await?;
         return Ok(());
     }
-    let mut text = format!("共订阅{}个源，订阅列表\n", sources.len());
+    let mut text = format!("共訂閱{}個源，訂閱列表\n", sources.len());
     for source in sources {
         // A feed the scheduler gave up on used to look identical to a healthy
         // one here; the marker is the cheapest place to notice it.
@@ -669,7 +669,7 @@ async fn list_subscriptions(bot: &Bot, msg: &Message, state: &BotState) -> Respo
             source.link.unwrap_or_default()
         ));
     }
-    text.push_str("\n⏸ 已暂停／⚠️ 抓取失败中，用 /feedcheck 查看详情");
+    text.push_str("\n⏸ 已暫停／⚠️ 抓取失敗中，用 /feedcheck 查看詳情");
     bot.send_message(msg.chat.id, text)
         .parse_mode(ParseMode::Markdown)
         .link_preview_options(no_preview())

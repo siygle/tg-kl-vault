@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn long_errors_are_truncated_on_a_char_boundary() {
         // A multi-byte error longer than the cap must not panic on slicing.
-        let long = "错".repeat(500);
+        let long = "錯".repeat(500);
         let truncated = truncate_error(&long);
         assert_eq!(truncated.chars().count(), 301, "300 chars plus the ellipsis");
         assert!(truncated.ends_with('…'));

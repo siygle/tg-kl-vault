@@ -83,21 +83,21 @@ impl FeedHealth {
 
     fn describe(&self) -> String {
         match self {
-            Self::Unreachable(err) => format!("连不上：{err}"),
+            Self::Unreachable(err) => format!("連不上：{err}"),
             Self::Http(code) => match StatusCode::from_u16(*code).ok().and_then(|s| s.canonical_reason()) {
                 Some(reason) => format!("HTTP {code} {reason}"),
                 None => format!("HTTP {code}"),
             },
             Self::Unparseable(err) => format!("不是有效的 RSS/Atom：{err}"),
-            Self::Empty => "抓得到，但一篇文章都没有".to_owned(),
+            Self::Empty => "抓得到，但一篇文章都沒有".to_owned(),
             Self::Abandoned { newest_age_days } => {
                 format!("最新一篇是 {newest_age_days} 天前，可能已停更")
             }
             Self::Ok { items, newest_age_days: Some(days) } => {
                 format!("正常，{items} 篇，最新 {days} 天前")
             }
-            Self::Ok { items, newest_age_days: None } => format!("正常，{items} 篇（无日期）"),
-            Self::NotModified => "正常，无更新（304）".to_owned(),
+            Self::Ok { items, newest_age_days: None } => format!("正常，{items} 篇（無日期）"),
+            Self::NotModified => "正常，無更新（304）".to_owned(),
         }
     }
 }
@@ -126,11 +126,11 @@ pub async fn handle_feedcheck(
         .await
         .map_err(to_request_error)?;
     if subs.is_empty() {
-        bot.send_message(msg.chat.id, "当前没有订阅").await?;
+        bot.send_message(msg.chat.id, "目前沒有訂閱").await?;
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, format!("正在检查{}个订阅源…", subs.len()))
+    bot.send_message(msg.chat.id, format!("正在檢查{}個訂閱源…", subs.len()))
         .await?;
 
     let now = now_unix();
@@ -142,7 +142,7 @@ pub async fn handle_feedcheck(
         .map(|sub| async move {
             let link = sub.link.clone().unwrap_or_default();
             let health = if link.is_empty() {
-                FeedHealth::Unreachable("订阅未记录网址".to_owned())
+                FeedHealth::Unreachable("訂閱未記錄網址".to_owned())
             } else {
                 probe(
                     &state.fetcher,
@@ -226,13 +226,13 @@ fn classify_fetch_error(err: &anyhow::Error) -> FeedHealth {
             return FeedHealth::Http(status.as_u16());
         }
         if req_err.is_timeout() {
-            return FeedHealth::Unreachable("请求逾时".to_owned());
+            return FeedHealth::Unreachable("請求逾時".to_owned());
         }
         if req_err.is_connect() {
-            return FeedHealth::Unreachable("无法建立连线".to_owned());
+            return FeedHealth::Unreachable("無法建立連線".to_owned());
         }
         if req_err.is_redirect() {
-            return FeedHealth::Unreachable("重定向次数过多".to_owned());
+            return FeedHealth::Unreachable("重新導向次數過多".to_owned());
         }
     }
     FeedHealth::Unreachable(first_line(&err.to_string()))
@@ -254,7 +254,7 @@ fn render_report(probed: &[Probed], now: i64) -> Vec<String> {
     let paused = probed.iter().filter(|p| p.paused).count();
 
     let mut lines = vec![format!(
-        "<b>订阅健检</b>：共{total}个源，{}个有问题，{paused}个已暂停",
+        "<b>訂閱健檢</b>：共{total}個源，{}個有問題，{paused}個已暫停",
         unhealthy
     )];
 
@@ -276,14 +276,14 @@ fn render_report(probed: &[Probed], now: i64) -> Vec<String> {
         lines.push(format!("　└ {}", escape(&p.health.describe())));
 
         if p.paused {
-            lines.push("　└ ⏸ 已暂停抓取，用 /set 选此源后可恢复".to_owned());
+            lines.push("　└ ⏸ 已暫停抓取，用 /set 選此源後可恢復".to_owned());
         }
         // The DB's memory of past failures, which the live probe above cannot
         // see. Disagreement between the two is the informative case.
         if p.error_count > 0 {
-            let detail = p.last_error.as_deref().unwrap_or("未记录原因");
+            let detail = p.last_error.as_deref().unwrap_or("未記錄原因");
             lines.push(format!(
-                "　└ 排程记录：连续失败{}次（{}）",
+                "　└ 排程記錄：連續失敗{}次（{}）",
                 p.error_count,
                 escape(&first_line(detail))
             ));
@@ -296,7 +296,7 @@ fn render_report(probed: &[Probed], now: i64) -> Vec<String> {
 
     let healthy = total - probed.iter().filter(|p| !p.health.is_healthy() || p.paused).count();
     lines.push(String::new());
-    lines.push(format!("其余{healthy}个源正常。失效的可用 /unsub 退订。"));
+    lines.push(format!("其餘{healthy}個源正常。失效的可用 /unsub 退訂。"));
     lines
 }
 
@@ -415,15 +415,15 @@ mod tests {
             probed(1, FeedHealth::Ok { items: 10, newest_age_days: Some(2) }),
             probed(2, FeedHealth::Http(404)),
             probed(3, FeedHealth::Empty),
-            probed(4, FeedHealth::Unreachable("请求逾时".to_owned())),
+            probed(4, FeedHealth::Unreachable("請求逾時".to_owned())),
         ];
         all.sort_by_key(|p| (p.health.severity(), p.source_id));
         assert_eq!(all.iter().map(|p| p.source_id).collect::<Vec<_>>(), vec![4, 2, 3, 1]);
 
         let text = chunk_lines(&render_report(&all, 0), MAX_MESSAGE_CHARS).join("\n");
-        assert!(text.contains("共4个源，3个有问题"));
+        assert!(text.contains("共4個源，3個有問題"));
         assert!(text.contains("HTTP 404 Not Found"));
-        assert!(text.contains("其余1个源正常"));
+        assert!(text.contains("其餘1個源正常"));
         // Healthy feeds are summarised, not enumerated.
         assert!(!text.contains("Feed 1</a>"));
     }
@@ -436,7 +436,7 @@ mod tests {
         ];
         let text = chunk_lines(&render_report(&all, 0), MAX_MESSAGE_CHARS).join("\n");
         assert!(text.contains("全部正常"));
-        assert!(!text.contains("其余"));
+        assert!(!text.contains("其餘"));
     }
 
     /// A paused source is invisible to the scheduler, so it must be reported
@@ -448,8 +448,8 @@ mod tests {
         p.error_count = 101;
         p.last_error = Some("HTTP status client error (503)".to_owned());
         let text = chunk_lines(&render_report(&[p], 0), MAX_MESSAGE_CHARS).join("\n");
-        assert!(text.contains("已暂停抓取"));
-        assert!(text.contains("连续失败101次"));
+        assert!(text.contains("已暫停抓取"));
+        assert!(text.contains("連續失敗101次"));
         assert!(text.contains("正常，5 篇"), "the live probe verdict is still shown");
     }
 
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn first_line_trims_multiline_errors_on_a_char_boundary() {
         assert_eq!(first_line("boom\nstack trace here"), "boom");
-        let long = "错".repeat(300);
+        let long = "錯".repeat(300);
         let trimmed = first_line(&long);
         assert_eq!(trimmed.chars().count(), 121);
     }
