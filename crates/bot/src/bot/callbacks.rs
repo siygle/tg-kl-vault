@@ -129,6 +129,18 @@ fn is_authorized(attachment: Attachment, query: &CallbackQuery) -> bool {
     attachment.user_id == query.from.id.0 as i64
 }
 
+/// Toast texts for the `/set` and `/settings` button paths. These used to all be
+/// the bare English string `"error"`, which told the user nothing and conflated
+/// "you may not touch this subscription" with "the database call failed".
+///
+/// Hardcoded zh-TW rather than routed through `Lang`, matching the rest of the
+/// `/set` panel (`render_feed_setting` is not localized either).
+const TOAST_NO_PERMISSION: &str = "你沒有權限操作這個訂閱";
+const TOAST_SUB_NOT_FOUND: &str = "找不到這個訂閱";
+const TOAST_UPDATE_FAILED: &str = "設定失敗，請稍後再試";
+const TOAST_UNKNOWN_ACTION: &str = "無法識別的操作";
+const TOAST_MODIFIED: &str = "修改成功";
+
 async fn respond_toast(bot: &Bot, query: &CallbackQuery, text: &str) -> ResponseResult<()> {
     bot.answer_callback_query(query.id.clone())
         .text(text)
@@ -187,7 +199,7 @@ async fn handle_settings_callback(
                 .strip_prefix("interval:")
                 .and_then(|v| v.parse::<i64>().ok())
             else {
-                return respond_toast(bot, query, "error").await;
+                return respond_toast(bot, query, "無法識別的更新頻率").await;
             };
             match state
                 .repo
@@ -197,7 +209,7 @@ async fn handle_settings_callback(
                 Ok(count) => respond_toast(bot, query, &current_lang.interval_updated(count)).await,
                 Err(err) => {
                     warn!(owner_id, minutes, error = %err, "failed to set interval");
-                    respond_toast(bot, query, "error").await
+                    respond_toast(bot, query, "更新頻率設定失敗，請稍後再試").await
                 }
             }
         }
@@ -215,7 +227,7 @@ async fn handle_settings_callback(
             };
             if let Err(err) = set_chat_lang(&state.repo, owner_id, lang).await {
                 warn!(owner_id, error = %err, "failed to set language");
-                return respond_toast(bot, query, "error").await;
+                return respond_toast(bot, query, "語系設定失敗，請稍後再試").await;
             }
             respond_toast(bot, query, lang.lang_updated()).await?;
             bot.edit_message_text(chat_id, message_id, lang.settings_title())
@@ -229,7 +241,7 @@ async fn handle_settings_callback(
             )
             .await
         }
-        _ => respond_toast(bot, query, "error").await,
+        _ => respond_toast(bot, query, TOAST_UNKNOWN_ACTION).await,
     }
 }
 
@@ -300,16 +312,16 @@ async fn handle_toggle_update(
     message_id: MessageId,
 ) -> ResponseResult<()> {
     if !is_authorized(attachment, query) {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_NO_PERMISSION).await;
     }
     let source_id = i64::from(attachment.source_id);
     let Ok(Some(sub)) = state.repo.subscription(attachment.user_id, source_id).await else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_SUB_NOT_FOUND).await;
     };
     let Ok(Some(source)) = state.repo.toggle_source_update_status(source_id).await else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_UPDATE_FAILED).await;
     };
-    respond_toast(bot, query, "修改成功").await?;
+    respond_toast(bot, query, TOAST_MODIFIED).await?;
     render_and_edit_setting(bot, chat_id, message_id, &source, &sub, attachment).await
 }
 
@@ -322,20 +334,20 @@ async fn handle_toggle_notice(
     message_id: MessageId,
 ) -> ResponseResult<()> {
     if !is_authorized(attachment, query) {
-        return edit_plain(bot, chat_id, message_id, "系統錯誤！").await;
+        return respond_toast(bot, query, TOAST_NO_PERMISSION).await;
     }
     let source_id = i64::from(attachment.source_id);
     let Ok(Some(source)) = state.repo.get_source(source_id).await else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_SUB_NOT_FOUND).await;
     };
     let Ok(Some(sub)) = state
         .repo
         .toggle_subscription_notice(attachment.user_id, source_id)
         .await
     else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_UPDATE_FAILED).await;
     };
-    respond_toast(bot, query, "修改成功").await?;
+    respond_toast(bot, query, TOAST_MODIFIED).await?;
     render_and_edit_setting(bot, chat_id, message_id, &source, &sub, attachment).await
 }
 
@@ -348,20 +360,20 @@ async fn handle_toggle_telegraph(
     message_id: MessageId,
 ) -> ResponseResult<()> {
     if !is_authorized(attachment, query) {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_NO_PERMISSION).await;
     }
     let source_id = i64::from(attachment.source_id);
     let Ok(Some(source)) = state.repo.get_source(source_id).await else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_SUB_NOT_FOUND).await;
     };
     let Ok(Some(sub)) = state
         .repo
         .toggle_subscription_telegraph(attachment.user_id, source_id)
         .await
     else {
-        return respond_toast(bot, query, "error").await;
+        return respond_toast(bot, query, TOAST_UPDATE_FAILED).await;
     };
-    respond_toast(bot, query, "修改成功").await?;
+    respond_toast(bot, query, TOAST_MODIFIED).await?;
     render_and_edit_setting(bot, chat_id, message_id, &source, &sub, attachment).await
 }
 
@@ -377,7 +389,7 @@ async fn handle_set_sub_tag(
     if !is_authorized(attachment, query) {
         // Go's `feedSetAuth` failure sends a *new* message via `ctx.Send`,
         // unlike every other handler here which edits in place.
-        bot.send_message(chat_id, "無權限").await?;
+        bot.send_message(chat_id, TOAST_NO_PERMISSION).await?;
         return Ok(());
     }
     let source_id = attachment.source_id;
