@@ -15,19 +15,21 @@ use crate::{
         callbacks::handle_callback,
         commands::Command,
         documents::handle_document,
+        feedcheck,
         keyboard::{feed_item_list_keyboard, settings_keyboard, unsuball_confirm_keyboard},
         sender::TeloxideSender,
         subscribe::create_source,
     },
     config::Config,
-    db::{models::Content, repo::Repo},
+    db::repo::Repo,
     feed::{
         fetch::{FetchOutcome, Fetcher},
         hash::gen_hash_id,
-        parse::parse_feed,
+        parse::{is_stale_item, parse_feed},
     },
     opml::{export_opml, OpmlSource},
     preview::{PreviewPublisher, PublishRequest, TelegraphPublisher},
+    scheduler::ledger_entry,
 };
 
 pub use crate::bot::i18n::Lang;
@@ -130,6 +132,7 @@ async fn handle_command(
         Command::Set => handle_set(&bot, &msg, &state).await?,
         Command::Settings => handle_settings(&bot, &msg, &state).await?,
         Command::Check => handle_check(&bot, &msg, &state).await?,
+        Command::Feedcheck => feedcheck::handle_feedcheck(&bot, &msg, &state).await?,
         Command::Bm(payload) => bookmarks::handle_bm(&bot, &msg, &state, payload.trim()).await?,
         Command::Bookmarks => bookmarks::handle_bookmarks(&bot, &msg, &state).await?,
         Command::Bmsearch(payload) => {
@@ -351,6 +354,7 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
     let sender = TeloxideSender::new(bot.clone());
     let publisher = TelegraphPublisher::new(&state.config.telegraph_token);
     let mut new_count = 0usize;
+    let mut stale_count = 0usize;
     let mut unchanged_count = 0usize;
     let mut error_count = 0usize;
     let now = now_unix();
@@ -415,6 +419,15 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
                     Err(err) => {
                         warn!(source_id, error = %err, "manual check parse failed");
                         error_count += 1;
+                        state
+                            .repo
+                            .mark_source_error(
+                                source.id,
+                                now + 60,
+                                &format!("parse failed: {err}"),
+                            )
+                            .await
+                            .map_err(to_request_error)?;
                         continue;
                     }
                 };
@@ -431,6 +444,25 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
 
                 for (item, hash_id) in parsed.items.iter().zip(hashes) {
                     if existing.contains(&hash_id) {
+                        continue;
+                    }
+                    // Same age gate as the scheduler: `/check` force-fetches
+                    // every subscription including paused and long-broken ones,
+                    // so without this it is the most reliable way to dump a
+                    // feed's entire back catalogue into the chat.
+                    if is_stale_item(item.published, now, state.config.fetch.max_item_age_days) {
+                        info!(
+                            source_id,
+                            hash_id = %hash_id,
+                            published = ?item.published,
+                            "manual check skipping stale item"
+                        );
+                        state
+                            .repo
+                            .insert_content(&ledger_entry(source.id, item, &hash_id, None))
+                            .await
+                            .map_err(to_request_error)?;
+                        stale_count += 1;
                         continue;
                     }
 
@@ -450,16 +482,12 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
 
                     state
                         .repo
-                        .insert_content(&Content {
-                            source_id: Some(source.id),
-                            hash_id: hash_id.clone(),
-                            raw_id: Some(item.guid.clone()),
-                            raw_link: Some(item.link.clone()),
-                            title: Some(item.title.clone()),
-                            telegraph_url: telegraph_url.clone(),
-                            created_at: None,
-                            updated_at: None,
-                        })
+                        .insert_content(&ledger_entry(
+                            source.id,
+                            item,
+                            &hash_id,
+                            telegraph_url.clone(),
+                        ))
                         .await
                         .map_err(to_request_error)?;
 
@@ -507,7 +535,7 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
                 error_count += 1;
                 state
                     .repo
-                    .mark_source_error(source.id, now + 60)
+                    .mark_source_error(source.id, now + 60, &err.to_string())
                     .await
                     .map_err(to_request_error)?;
             }
@@ -517,8 +545,8 @@ async fn handle_check(bot: &Bot, msg: &Message, state: &BotState) -> ResponseRes
     bot.send_message(
         msg.chat.id,
         format!(
-            "检查完成：新增{}篇，{}个源无更新，{}个源失败",
-            new_count, unchanged_count, error_count
+            "检查完成：新增{}篇，忽略{}篇过旧，{}个源无更新，{}个源失败",
+            new_count, stale_count, unchanged_count, error_count
         ),
     )
     .await?;
@@ -624,13 +652,24 @@ async fn list_subscriptions(bot: &Bot, msg: &Message, state: &BotState) -> Respo
     }
     let mut text = format!("共订阅{}个源，订阅列表\n", sources.len());
     for source in sources {
+        // A feed the scheduler gave up on used to look identical to a healthy
+        // one here; the marker is the cheapest place to notice it.
+        let marker = if source.is_paused() {
+            "⏸ "
+        } else if source.error_count.unwrap_or(0) > 0 {
+            "⚠️ "
+        } else {
+            "✅ "
+        };
         text.push_str(&format!(
-            "[[{}]] [{}]({})\n",
+            "{}[[{}]] [{}]({})\n",
+            marker,
             source.source_id.unwrap_or_default(),
             source.title.unwrap_or_default(),
             source.link.unwrap_or_default()
         ));
     }
+    text.push_str("\n⏸ 已暂停／⚠️ 抓取失败中，用 /feedcheck 查看详情");
     bot.send_message(msg.chat.id, text)
         .parse_mode(ParseMode::Markdown)
         .link_preview_options(no_preview())
@@ -668,7 +707,7 @@ pub(crate) fn no_preview() -> LinkPreviewOptions {
     }
 }
 
-fn now_unix() -> i64 {
+pub(crate) fn now_unix() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

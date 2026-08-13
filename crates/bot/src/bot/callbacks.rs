@@ -14,7 +14,7 @@ use crate::{
             settings_language_keyboard, settings_opml_keyboard,
         },
         render::{render_feed_setting, FeedSettingData},
-        runtime::{chat_lang, export_chat_opml, set_chat_lang, BotState, Lang},
+        runtime::{chat_lang, export_chat_opml, now_unix, set_chat_lang, BotState, Lang},
     },
     config::ERROR_THRESHOLD,
     db::models::{Source, Subscribe},
@@ -251,6 +251,10 @@ async fn render_and_edit_setting(
         enable_notification: sub.enable_notification,
         enable_telegraph: sub.enable_telegraph,
         tag: sub.tag.as_deref().unwrap_or(""),
+        last_success_at: source.last_success_at,
+        last_error: source.last_error.as_deref(),
+        last_error_at: source.last_error_at,
+        now: now_unix(),
     });
     let keyboard = feed_setting_keyboard(
         attachment,

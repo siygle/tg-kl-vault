@@ -87,11 +87,21 @@ pub struct FeedSettingData<'a> {
     pub enable_notification: Option<i64>,
     pub enable_telegraph: Option<i64>,
     pub tag: &'a str,
+    // Health (migration 0005). `now` is passed in rather than read from the
+    // clock so the rendering stays a pure function and testable.
+    pub last_success_at: Option<i64>,
+    pub last_error: Option<&'a str>,
+    pub last_error_at: Option<i64>,
+    pub now: i64,
 }
 
 /// Renders the Go `feedSettingTmpl` (`internal/bot/handler/set.go`). Sent as
 /// HTML, so the feed-derived title/link/tag are escaped (deliberate deviation
 /// from Go — see `render_html`); the static labels stay byte-for-byte.
+///
+/// The `[最后成功]`/`[最后错误]` lines are appended *after* the Go template's
+/// last field, so the Go-parity prefix is untouched. `[抓取更新]` only ever said
+/// paused-or-not; these say why and since when.
 pub fn render_feed_setting(data: &FeedSettingData<'_>) -> String {
     let status = if data.source_error_count >= data.error_threshold { "暂停" } else { "抓取中" };
     let notice = match data.enable_notification {
@@ -106,7 +116,7 @@ pub fn render_feed_setting(data: &FeedSettingData<'_>) -> String {
     };
     let tag = if data.tag.is_empty() { "无".to_owned() } else { escape(data.tag) };
 
-    format!(
+    let mut out = format!(
         "\n订阅<b>设置</b>\n[id] {}\n[标题] {}\n[Link] {}\n[抓取更新] {}\n[抓取频率] {}分钟\n[通知] {}\n[Telegraph] {}\n[Tag] {}\n",
         data.source_id,
         escape(data.source_title),
@@ -116,7 +126,35 @@ pub fn render_feed_setting(data: &FeedSettingData<'_>) -> String {
         notice,
         telegraph,
         tag
-    )
+    );
+
+    out.push_str(&format!("[最后成功] {}\n", humanize_ago(data.last_success_at, data.now)));
+    if let Some(error) = data.last_error.filter(|e| !e.is_empty()) {
+        out.push_str(&format!(
+            "[最后错误] {}（{}）\n",
+            escape(error),
+            humanize_ago(data.last_error_at, data.now)
+        ));
+    }
+    out
+}
+
+/// Renders a unix timestamp as a coarse "how long ago", which is all anyone
+/// needs when triaging a feed. `None` means it never happened.
+pub fn humanize_ago(at: Option<i64>, now: i64) -> String {
+    let Some(at) = at else {
+        return "从未".to_owned();
+    };
+    let secs = now.saturating_sub(at);
+    if secs < 0 {
+        return "刚刚".to_owned();
+    }
+    match secs {
+        s if s < 60 => "刚刚".to_owned(),
+        s if s < 3600 => format!("{}分钟前", s / 60),
+        s if s < 86_400 => format!("{}小时前", s / 3600),
+        s => format!("{}天前", s / 86_400),
+    }
 }
 
 fn push_preview(out: &mut String, preview_text: &str) {
@@ -215,8 +253,13 @@ mod tests {
             enable_notification: Some(1),
             enable_telegraph: Some(0),
             tag: "#x&y",
+            last_success_at: None,
+            last_error: Some("boom & <crash>"),
+            last_error_at: None,
+            now: 1_700_000_000,
         };
         let out = render_feed_setting(&data);
+        assert!(out.contains("[最后错误] boom &amp; &lt;crash&gt;"));
         assert!(out.contains("[标题] A &amp; B &lt;feed&gt;"));
         assert!(out.contains("[Link] https://x.test/f?a=1&amp;b=2"));
         assert!(out.contains("[Tag] #x&amp;y"));
@@ -236,16 +279,46 @@ mod tests {
             enable_notification: Some(1),
             enable_telegraph: Some(0),
             tag: "",
+            last_success_at: None,
+            last_error: None,
+            last_error_at: None,
+            now: 1_700_000_000,
         };
         assert_eq!(
             render_feed_setting(&data),
-            "\n订阅<b>设置</b>\n[id] 7\n[标题] 标题\n[Link] https://example.com/feed\n[抓取更新] 抓取中\n[抓取频率] 10分钟\n[通知] 开启\n[Telegraph] 关闭\n[Tag] 无\n"
+            "\n订阅<b>设置</b>\n[id] 7\n[标题] 标题\n[Link] https://example.com/feed\n[抓取更新] 抓取中\n[抓取频率] 10分钟\n[通知] 开启\n[Telegraph] 关闭\n[Tag] 无\n[最后成功] 从未\n"
         );
 
         let paused = FeedSettingData { source_error_count: 101, tag: "#tag", ..data };
         assert_eq!(
             render_feed_setting(&paused),
-            "\n订阅<b>设置</b>\n[id] 7\n[标题] 标题\n[Link] https://example.com/feed\n[抓取更新] 暂停\n[抓取频率] 10分钟\n[通知] 开启\n[Telegraph] 关闭\n[Tag] #tag\n"
+            "\n订阅<b>设置</b>\n[id] 7\n[标题] 标题\n[Link] https://example.com/feed\n[抓取更新] 暂停\n[抓取频率] 10分钟\n[通知] 开启\n[Telegraph] 关闭\n[Tag] #tag\n[最后成功] 从未\n"
         );
+
+        // Health lines are strictly appended: the Go template's own output is
+        // still an exact prefix of ours.
+        let healthy = FeedSettingData {
+            last_success_at: Some(1_700_000_000 - 7200),
+            last_error: Some("HTTP 404"),
+            last_error_at: Some(1_700_000_000 - 3 * 86_400),
+            ..data
+        };
+        assert_eq!(
+            render_feed_setting(&healthy),
+            "\n订阅<b>设置</b>\n[id] 7\n[标题] 标题\n[Link] https://example.com/feed\n[抓取更新] 抓取中\n[抓取频率] 10分钟\n[通知] 开启\n[Telegraph] 关闭\n[Tag] 无\n[最后成功] 2小时前\n[最后错误] HTTP 404（3天前）\n"
+        );
+    }
+
+    #[test]
+    fn humanize_ago_buckets_by_magnitude() {
+        let now = 1_700_000_000;
+        assert_eq!(humanize_ago(None, now), "从未");
+        assert_eq!(humanize_ago(Some(now), now), "刚刚");
+        assert_eq!(humanize_ago(Some(now - 59), now), "刚刚");
+        assert_eq!(humanize_ago(Some(now - 60), now), "1分钟前");
+        assert_eq!(humanize_ago(Some(now - 7200), now), "2小时前");
+        assert_eq!(humanize_ago(Some(now - 3 * 86_400), now), "3天前");
+        // Clock skew must not underflow into a giant number.
+        assert_eq!(humanize_ago(Some(now + 500), now), "刚刚");
     }
 }

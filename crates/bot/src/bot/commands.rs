@@ -48,6 +48,9 @@ pub enum Command {
     Bmtag(String),
     #[command(description = "")]
     Bmdel(String),
+    // Feed health — appended after bookmarks, same frozen-prefix rule.
+    #[command(description = "检查订阅是否还有效")]
+    Feedcheck,
 }
 
 /// The 14 commands the Go version shipped, frozen as a Go-parity golden. New
