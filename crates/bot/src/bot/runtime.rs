@@ -154,11 +154,15 @@ async fn handle_command(
     Ok(())
 }
 
-const SUB_PROMPT: &str = "🔗 請回覆此訊息貼上要訂閱的 RSS 網址（直接傳網址即可）";
-const SETFEEDTAG_PROMPT: &str = "🏷️ 請回覆此訊息輸入：來源 ID 標籤1 標籤2（最多三個標籤）";
+const SUB_PROMPT: &str = "🔗 請回覆此訊息貼上要訂閱的 RSS 網址（直接傳網址即可；輸入「取消」可中止）";
+const SETFEEDTAG_PROMPT: &str = "🏷️ 請回覆此訊息輸入：來源 ID 標籤1 標籤2（最多三個標籤；輸入「取消」可中止）";
 
 fn force_reply(placeholder: &str) -> ForceReply {
     ForceReply::new().input_field_placeholder(placeholder.to_owned())
+}
+
+fn is_cancel(payload: &str) -> bool {
+    matches!(payload.trim().to_ascii_lowercase().as_str(), "取消" | "cancel" | "/cancel")
 }
 
 async fn handle_prompt_reply(bot: Bot, msg: Message, state: Arc<BotState>) -> ResponseResult<()> {
@@ -167,6 +171,11 @@ async fn handle_prompt_reply(bot: Bot, msg: Message, state: Arc<BotState>) -> Re
         .and_then(|m| m.text())
         .unwrap_or_default();
     let payload = msg.text().unwrap_or_default().trim().to_owned();
+
+    if is_prompt(replied_to) && is_cancel(&payload) {
+        bot.send_message(msg.chat.id, "已取消。").await?;
+        return Ok(());
+    }
 
     match replied_to {
         SUB_PROMPT => handle_subscribe(&bot, &msg, &state, &payload).await?,
@@ -181,6 +190,19 @@ async fn handle_prompt_reply(bot: Bot, msg: Message, state: Arc<BotState>) -> Re
         _ => {}
     }
     Ok(())
+}
+
+fn is_prompt(text: &str) -> bool {
+    matches!(
+        text,
+        SUB_PROMPT
+            | SETFEEDTAG_PROMPT
+            | bookmarks::BM_PROMPT
+            | bookmarks::BMSEARCH_PROMPT
+            | bookmarks::BMNOTE_PROMPT
+            | bookmarks::BMTAG_PROMPT
+            | bookmarks::BMDEL_PROMPT
+    )
 }
 
 // Go sends these replies with legacy `tb.ModeMarkdown`, not MarkdownV2 (which
@@ -202,7 +224,8 @@ async fn handle_subscribe(
     let source = match create_source(&state.repo, &state.fetcher, payload).await {
         Ok(source) => source,
         Err(err) => {
-            bot.send_message(msg.chat.id, format!("{err}，訂閱失敗"))
+            bot.send_message(msg.chat.id, format!("{err}，訂閱失敗。請重新貼上 RSS 網址，或輸入「取消」。"))
+                .reply_markup(force_reply("https://example.com/feed"))
                 .await?;
             return Ok(());
         }

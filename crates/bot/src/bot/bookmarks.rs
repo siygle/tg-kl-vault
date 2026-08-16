@@ -30,11 +30,11 @@ pub const BM_BTN_PREFIX: &str = "tg-kl-vault:bmbtn:";
 pub const BM_AI_PREFIX: &str = "tg-kl-vault:bmai:";
 pub const BM_SUM_PREFIX: &str = "tg-kl-vault:bmsum:";
 
-pub const BM_PROMPT: &str = "🔖 請回覆此訊息貼上要收藏的網址";
-pub const BMSEARCH_PROMPT: &str = "🔍 請回覆此訊息輸入要搜尋的書籤關鍵字";
-pub const BMNOTE_PROMPT: &str = "📝 請回覆此訊息輸入：書籤 ID 備註內容";
-pub const BMTAG_PROMPT: &str = "🏷️ 請回覆此訊息輸入：書籤 ID 標籤1 標籤2";
-pub const BMDEL_PROMPT: &str = "🗑️ 請回覆此訊息輸入要刪除的書籤 ID";
+pub const BM_PROMPT: &str = "🔖 請回覆此訊息貼上要收藏的網址（輸入「取消」可中止）";
+pub const BMSEARCH_PROMPT: &str = "🔍 請回覆此訊息輸入要搜尋的書籤關鍵字（輸入「取消」可中止）";
+pub const BMNOTE_PROMPT: &str = "📝 請回覆此訊息輸入：書籤 ID 備註內容（輸入「取消」可中止）";
+pub const BMTAG_PROMPT: &str = "🏷️ 請回覆此訊息輸入：書籤 ID 標籤1 標籤2（輸入「取消」可中止）";
+pub const BMDEL_PROMPT: &str = "🗑️ 請回覆此訊息輸入要刪除的書籤 ID（輸入「取消」可中止）";
 
 fn force_reply(placeholder: &str) -> ForceReply {
     ForceReply::new().input_field_placeholder(placeholder.to_owned())
@@ -498,7 +498,9 @@ pub async fn handle_bm(bot: &Bot, msg: &Message, state: &BotState, payload: &str
     let url = match normalize_url(&raw) {
         Ok(url) => url,
         Err(_) => {
-            bot.send_message(chat_id, lang.bm_invalid_url()).await?;
+            bot.send_message(chat_id, format!("{} 請重新貼上網址，或輸入「取消」。", lang.bm_invalid_url()))
+                .reply_markup(force_reply("https://example.com/article"))
+                .await?;
             return Ok(());
         }
     };
