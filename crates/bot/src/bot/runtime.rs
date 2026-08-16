@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use teloxide::{
     prelude::*,
-    types::{ChatId, LinkPreviewOptions, ParseMode},
+    types::{ChatId, ForceReply, LinkPreviewOptions, ParseMode},
     utils::command::BotCommands,
 };
 use tokio::sync::watch;
@@ -78,6 +78,15 @@ pub async fn run_bot(
                 .filter(|msg: Message| msg.document().is_some())
                 .endpoint(handle_document),
         )
+        // Replies to our ForceReply prompts (e.g. the /sub "paste a URL" flow).
+        // Non-command text that isn't a reply to one of our prompts is ignored.
+        .branch(
+            Update::filter_message()
+                .filter(|msg: Message| {
+                    msg.text().is_some() && msg.reply_to_message().is_some()
+                })
+                .endpoint(handle_prompt_reply),
+        )
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
     let mut dispatcher = Dispatcher::builder(bot, handler)
@@ -152,6 +161,28 @@ async fn handle_command(
 // Go sends these replies with legacy `tb.ModeMarkdown`, not MarkdownV2 (which
 // would require escaping titles/tags for punctuation Go never escapes).
 #[allow(deprecated)]
+/// Exact text of the /sub ForceReply prompt. A reply whose `reply_to_message`
+/// carries this text is routed back into `handle_subscribe`. Keep this string
+/// stable (it is the match key); change it and old in-flight prompts stop
+/// resolving, which is harmless.
+const SUB_PROMPT: &str = "🔗 請回覆此訊息貼上要訂閱的 RSS 網址（直接傳網址即可）";
+
+/// Routes a plain-text reply back to the command it answers, based on the text
+/// of the message it replies to. Replies to anything other than one of our
+/// known prompts are ignored.
+async fn handle_prompt_reply(bot: Bot, msg: Message, state: Arc<BotState>) -> ResponseResult<()> {
+    let replied_to = msg
+        .reply_to_message()
+        .and_then(|m| m.text())
+        .unwrap_or_default();
+    let payload = msg.text().unwrap_or_default().trim().to_owned();
+
+    if replied_to == SUB_PROMPT {
+        handle_subscribe(&bot, &msg, &state, &payload).await?;
+    }
+    Ok(())
+}
+
 async fn handle_subscribe(
     bot: &Bot,
     msg: &Message,
@@ -159,11 +190,16 @@ async fn handle_subscribe(
     payload: &str,
 ) -> ResponseResult<()> {
     if payload.is_empty() {
-        bot.send_message(
-            msg.chat.id,
-            "請在指令後帶上需要訂閱的 RSS URL，例如：/sub https://justinpot.com/feed/",
-        )
-        .await?;
+        // Tapping /sub from the command menu fires with no argument. Instead of
+        // a dead-end hint, prompt with ForceReply so Telegram focuses the input
+        // box; the pasted URL comes back as a reply and is routed by
+        // `handle_prompt_reply`.
+        bot.send_message(msg.chat.id, SUB_PROMPT)
+            .reply_markup(
+                ForceReply::new()
+                    .input_field_placeholder("https://example.com/feed".to_owned()),
+            )
+            .await?;
         return Ok(());
     }
 
