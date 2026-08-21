@@ -9,6 +9,7 @@
 pub mod bars;
 pub mod clock;
 pub mod indicators;
+pub mod render;
 pub mod service;
 pub mod signals;
 pub mod source;
@@ -20,6 +21,7 @@ pub use clock::{
     PushTime, SessionMeta, SessionState, SETTLE_GRACE_SECS,
 };
 pub use indicators::{snapshot, Snapshot, MIN_BARS_FOR_INDICATORS};
+pub use render::{render_daily_report, render_quote_card, render_watchlist, ReportEntry};
 pub use service::{
     AddError, AddOutcome, MarketScope, QuoteView, StockService, WatchlistPage,
 };
