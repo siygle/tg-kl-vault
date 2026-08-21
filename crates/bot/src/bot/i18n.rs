@@ -131,6 +131,34 @@ strings! {
     stk_delayed => en: "⏰ delayed", zh: "⏰ 延遲送出";
     stk_empty => en: "No stocks tracked yet. Use /stockadd <symbol>.", zh: "還沒有追蹤任何股票。使用 /stockadd <代號>。";
     stk_ai_disclaimer => en: "For reference only; not investment advice.", zh: "以上僅供參考，不構成投資建議。";
+
+    // ── Stock tracking (commands / callbacks / settings) ───────────────────
+    stk_settings_button => en: "📈 Stocks", zh: "📈 股票";
+    stk_add_button => en: "➕ Track", zh: "➕ 加入追蹤";
+    stk_added => en: "➕ Added to your watchlist.", zh: "➕ 已加入自選股。";
+    stk_already => en: "Already in your watchlist.", zh: "已在自選股清單中。";
+    stk_unknown_symbol => en: "Symbol not found. Check the code and try again.", zh: "找不到這個代號，請確認後再試。";
+    stk_upstream => en: "Data source is unavailable right now. Try again later.", zh: "資料來源暫時無法使用，請稍後再試。";
+    stk_removed => en: "🗑 Removed from your watchlist.", zh: "🗑 已從自選股移除。";
+    stk_not_found => en: "Not in your watchlist.", zh: "不在你的自選股清單中。";
+    stk_no_permission => en: "You can't do that here.", zh: "你沒有權限這麼做。";
+    stk_bad_action => en: "Unknown action.", zh: "未知的操作。";
+    stk_stock_usage => en: "Usage: /stock <symbol> (e.g. 2330, AAPL).", zh: "用法：/stock <代號>（例如 2330、AAPL）。";
+    stk_add_usage => en: "Usage: /stockadd <symbol> (e.g. 2330, 6488, AAPL).", zh: "用法：/stockadd <代號>（例如 2330、6488、AAPL）。";
+    stk_del_usage => en: "Usage: /stockdel <id or symbol>.", zh: "用法：/stockdel <編號或代號>。";
+    stk_delete_confirm => en: "Remove this stock from the watchlist?", zh: "確定要從自選股移除這檔股票嗎？";
+    stk_confirm_delete => en: "Confirm remove", zh: "確認移除";
+    stk_prompt => en: "📈 Reply with a stock symbol to look up (type \"cancel\" to stop)", zh: "📈 請回覆此訊息輸入要查詢的股票代號（輸入「取消」可中止）";
+    stk_placeholder => en: "2330 or AAPL", zh: "2330 或 AAPL";
+    stk_add_prompt => en: "➕ Reply with a stock symbol to track (type \"cancel\" to stop)", zh: "➕ 請回覆此訊息輸入要追蹤的股票代號（輸入「取消」可中止）";
+    stk_del_prompt => en: "🗑️ Reply with the id or symbol to remove (type \"cancel\" to stop)", zh: "🗑️ 請回覆此訊息輸入要移除的編號或代號（輸入「取消」可中止）";
+    stk_push_time_tw_prompt => en: "🇹🇼 Reply with the TW close-push time HH:MM, or \"off\" (type \"cancel\" to stop)", zh: "🇹🇼 請回覆此訊息輸入台股收盤推播時間 HH:MM，或「off」關閉（輸入「取消」可中止）";
+    stk_push_time_us_prompt => en: "🇺🇸 Reply with the US close-push time HH:MM, or \"off\" (type \"cancel\" to stop)", zh: "🇺🇸 請回覆此訊息輸入美股收盤推播時間 HH:MM，或「off」關閉（輸入「取消」可中止）";
+    stk_push_time_placeholder => en: "14:00 or off", zh: "14:00 或 off";
+    stk_push_title => en: "📈 <b>Close-push settings</b>\nTap a market to toggle, or set a time.", zh: "📈 <b>收盤推播設定</b>\n點市場可切換開關，或設定推播時間。";
+    stk_push_saved => en: "Saved.", zh: "已儲存。";
+    stk_push_bad_time => en: "Use HH:MM (00:00–23:59) or \"off\".", zh: "請輸入 HH:MM（00:00–23:59）或「off」。";
+    stk_push_time_default => en: "after close", zh: "收盤後";
 }
 
 impl Lang {
@@ -260,6 +288,43 @@ impl Lang {
         match self {
             Self::En => format!("…and {more} more, see /stocks"),
             Self::ZhTw => format!("…及其他 {more} 檔，見 /stocks"),
+        }
+    }
+
+    pub fn stk_limit_chat(self, max: u32) -> String {
+        match self {
+            Self::En => format!("Watchlist is full ({max} max). Remove one first."),
+            Self::ZhTw => format!("自選股已達上限（{max} 檔），請先移除一檔。"),
+        }
+    }
+
+    pub fn stk_limit_global(self, max: u32) -> String {
+        match self {
+            Self::En => format!("The global symbol limit ({max}) is reached; try again later."),
+            Self::ZhTw => format!("已達全域追蹤上限（{max} 檔），請稍後再試。"),
+        }
+    }
+
+    /// Per-market enable toggle button, e.g. "🇹🇼 台股：開".
+    pub fn stk_push_toggle(self, market: crate::stock::Market, on: bool) -> String {
+        let name = self.stk_market_name(market);
+        let state = self.on_off(on);
+        format!("{} {name}：{state}", self.stk_market_flag(market))
+    }
+
+    /// Per-market time button, e.g. "🇹🇼 時間：14:00".
+    pub fn stk_push_time_button(self, market: crate::stock::Market, time: &str) -> String {
+        let flag = self.stk_market_flag(market);
+        match self {
+            Self::En => format!("{flag} time: {time}"),
+            Self::ZhTw => format!("{flag} 時間：{time}"),
+        }
+    }
+
+    fn stk_market_flag(self, market: crate::stock::Market) -> &'static str {
+        match market {
+            crate::stock::Market::Tw => "🇹🇼",
+            crate::stock::Market::Us => "🇺🇸",
         }
     }
 

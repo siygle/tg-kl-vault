@@ -116,6 +116,18 @@ impl Repo {
             > 0)
     }
 
+    pub async fn get_watch_by_symbol(
+        &self,
+        chat_id: i64,
+        symbol: &str,
+    ) -> DbResult<Option<WatchItem>> {
+        self.query_opt::<WatchItem>(
+            &format!("SELECT {WATCH_COLS} FROM stock_watchlist WHERE chat_id = ? AND symbol = ?"),
+            libsql::params![chat_id, symbol],
+        )
+        .await
+    }
+
     pub async fn get_watch(&self, chat_id: i64, id: i64) -> DbResult<Option<WatchItem>> {
         self.query_opt::<WatchItem>(
             &format!("SELECT {WATCH_COLS} FROM stock_watchlist WHERE chat_id = ? AND id = ?"),

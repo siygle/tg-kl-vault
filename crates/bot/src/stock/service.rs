@@ -438,6 +438,14 @@ impl<S: StockSource> StockService<S> {
         Ok(self.repo.get_watch(chat_id, id).await?)
     }
 
+    pub async fn get_watch_by_symbol(
+        &self,
+        chat_id: i64,
+        symbol: &str,
+    ) -> anyhow::Result<Option<WatchItem>> {
+        Ok(self.repo.get_watch_by_symbol(chat_id, symbol).await?)
+    }
+
     pub async fn set_note(&self, chat_id: i64, id: i64, note: &str) -> anyhow::Result<bool> {
         Ok(self.repo.set_watch_note(chat_id, id, note).await?)
     }

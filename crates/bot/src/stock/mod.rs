@@ -26,5 +26,5 @@ pub use service::{
     AddError, AddOutcome, MarketScope, QuoteView, StockService, WatchlistPage,
 };
 pub use signals::{detect, Signal};
-pub use source::{classify_source_error, SourceError, StockSource, YahooSource};
+pub use source::{classify_source_error, SourceError, StockSource, TwOfficialSource, YahooSource};
 pub use symbol::{parse, Board, Market, Parsed, Symbol};

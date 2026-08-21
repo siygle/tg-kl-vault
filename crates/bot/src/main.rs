@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use clap::Parser;
 use flowerss_bot::{
     bot::{
         runtime::run_bot,
         sender::{NoopSender, TeloxideSender},
+        stocks::StockSvc,
     },
     cli::Args,
     config::Config,
@@ -11,6 +14,7 @@ use flowerss_bot::{
     feed::fetch::Fetcher,
     preview::{NoopPublisher, TelegraphPublisher},
     scheduler::{Scheduler, SchedulerOptions},
+    stock::{StockService, TwOfficialSource, YahooSource},
     tagging::{build_tagger, worker::TagWorker},
 };
 use teloxide::Bot;
@@ -88,8 +92,22 @@ async fn main() -> anyhow::Result<()> {
     let worker_rx = shutdown_rx.clone();
     let worker_task = tokio::spawn(async move { worker.run_until_shutdown(worker_rx).await });
 
+    // One StockService, shared (Arc) by the bot handlers and the stock worker,
+    // so the rate limiter / 429 cooldown / hard-lock state is process-wide.
+    let stock: Arc<StockSvc> = Arc::new(StockService::new(
+        repo.clone(),
+        YahooSource::new(fetcher.client().clone(), config.stock.yahoo_endpoint.clone()),
+        Some(TwOfficialSource::new(
+            fetcher.client().clone(),
+            config.stock.twse_endpoint.clone(),
+            config.stock.tpex_endpoint.clone(),
+        )),
+        config.stock.clone(),
+    ));
+
     let bot_rx = shutdown_rx.clone();
-    let bot_task = tokio::spawn(async move { run_bot(bot, config, repo, fetcher, bot_rx).await });
+    let bot_task =
+        tokio::spawn(async move { run_bot(bot, config, repo, fetcher, stock, bot_rx).await });
 
     let (scheduler_result, worker_result, bot_result) =
         tokio::try_join!(scheduler_task, worker_task, bot_task).context("join tasks")?;
