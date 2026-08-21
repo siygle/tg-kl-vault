@@ -9,6 +9,7 @@
 pub mod bars;
 pub mod clock;
 pub mod indicators;
+pub mod service;
 pub mod signals;
 pub mod source;
 pub mod symbol;
@@ -19,6 +20,9 @@ pub use clock::{
     PushTime, SessionMeta, SessionState, SETTLE_GRACE_SECS,
 };
 pub use indicators::{snapshot, Snapshot, MIN_BARS_FOR_INDICATORS};
+pub use service::{
+    AddError, AddOutcome, MarketScope, QuoteView, StockService, WatchlistPage,
+};
 pub use signals::{detect, Signal};
 pub use source::{classify_source_error, SourceError, StockSource, YahooSource};
 pub use symbol::{parse, Board, Market, Parsed, Symbol};

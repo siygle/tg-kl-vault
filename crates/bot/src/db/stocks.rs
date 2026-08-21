@@ -104,6 +104,18 @@ impl Repo {
             .await
     }
 
+    /// Whether any chat tracks this symbol — lets the global-cap check allow a
+    /// second chat to add an already-tracked symbol (distinct count won't grow).
+    pub async fn symbol_tracked_anywhere(&self, symbol: &str) -> DbResult<bool> {
+        Ok(self
+            .scalar_i64(
+                "SELECT COUNT(*) FROM stock_watchlist WHERE symbol = ?",
+                libsql::params![symbol],
+            )
+            .await?
+            > 0)
+    }
+
     pub async fn get_watch(&self, chat_id: i64, id: i64) -> DbResult<Option<WatchItem>> {
         self.query_opt::<WatchItem>(
             &format!("SELECT {WATCH_COLS} FROM stock_watchlist WHERE chat_id = ? AND id = ?"),
