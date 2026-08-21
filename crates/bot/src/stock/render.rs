@@ -227,6 +227,8 @@ pub fn render_watchlist(page: &WatchlistPage, lang: Lang) -> String {
 /// from cached bars + meta; kept plain so rendering stays pure and testable.
 #[derive(Debug, Clone)]
 pub struct ReportEntry {
+    /// Canonical symbol (`2330.TW`) — used as the commentary cache key.
+    pub canonical: String,
     pub local_code: String,
     pub display_name: String,
     pub snapshot: Snapshot,
@@ -238,6 +240,9 @@ pub struct ReportEntry {
     /// 20-day MA computed from 19 days and a hole is the worst kind of wrong —
     /// it looks right.
     pub indicators_unavailable: bool,
+    /// Optional AI commentary (already length-capped, not yet HTML-escaped —
+    /// escaping happens here at emit time). The remote agent is untrusted text.
+    pub commentary: Option<String>,
 }
 
 fn push_entry_lines(lines: &mut Vec<String>, e: &ReportEntry, lang: Lang) {
@@ -292,6 +297,10 @@ fn push_entry_lines(lines: &mut Vec<String>, e: &ReportEntry, lang: Lang) {
     for line in signal_lines(&e.signals, lang) {
         lines.push(line);
     }
+    if let Some(commentary) = &e.commentary {
+        // Untrusted remote-agent text: escape before it enters an HTML message.
+        lines.push(format!("🤖 {}", escape(commentary)));
+    }
 }
 
 /// The daily close report as individual lines (feed to `chunk_lines`). Never
@@ -312,6 +321,10 @@ pub fn render_daily_report(
     let mut lines = vec![header, String::new()];
     for e in entries {
         push_entry_lines(&mut lines, e, lang);
+    }
+    if entries.iter().any(|e| e.commentary.is_some()) {
+        lines.push(String::new());
+        lines.push(lang.stk_ai_disclaimer().to_owned());
     }
     lines
 }
@@ -384,6 +397,7 @@ mod tests {
     #[test]
     fn company_names_are_html_escaped() {
         let entry = ReportEntry {
+            canonical: "2330.TW".into(),
             local_code: "2330".into(),
             display_name: "A & B <script>".into(),
             snapshot: snap(60),
@@ -391,18 +405,23 @@ mod tests {
             week52_high: Some(2535.0),
             week52_low: Some(1135.0),
             indicators_unavailable: false,
+            commentary: Some("buy <b>now</b> & profit".into()),
         };
         let lines = render_daily_report(Market::Tw, "2026-08-21", &[entry], false, Lang::ZhTw);
         let text = lines.join("\n");
         assert!(text.contains("A &amp; B &lt;script&gt;"));
         assert!(!text.contains("<script>"));
         assert!(text.contains("⭐ KD 黃金交叉"));
+        // Untrusted agent commentary is escaped too.
+        assert!(text.contains("buy &lt;b&gt;now&lt;/b&gt; &amp; profit"));
+        assert!(text.contains(Lang::ZhTw.stk_ai_disclaimer()));
     }
 
     #[test]
     fn report_lines_never_exceed_the_chunk_limit_when_chunked() {
         let entries: Vec<ReportEntry> = (0..30)
             .map(|i| ReportEntry {
+                canonical: format!("{:04}.TW", 2000 + i),
                 local_code: format!("{:04}", 2000 + i),
                 display_name: "測試公司".into(),
                 snapshot: snap(60),
@@ -410,6 +429,7 @@ mod tests {
                 week52_high: Some(2535.0),
                 week52_low: Some(1135.0),
                 indicators_unavailable: false,
+                commentary: None,
             })
             .collect();
         let lines = render_daily_report(Market::Tw, "2026-08-21", &entries, true, Lang::ZhTw);
@@ -421,6 +441,7 @@ mod tests {
     #[test]
     fn fallback_without_history_omits_indicators_entirely() {
         let entry = ReportEntry {
+            canonical: "2330.TW".into(),
             local_code: "2330".into(),
             display_name: "台積電".into(),
             snapshot: snap(1), // single fallback bar
@@ -428,6 +449,7 @@ mod tests {
             week52_high: None,
             week52_low: None,
             indicators_unavailable: true,
+            commentary: None,
         };
         let text = render_daily_report(Market::Tw, "2026-08-21", &[entry], false, Lang::ZhTw).join("\n");
         assert!(text.contains(Lang::ZhTw.stk_indicators_unavailable()));

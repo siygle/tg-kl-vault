@@ -161,6 +161,11 @@ strings! {
     stk_push_time_default => en: "after close", zh: "收盤後";
     stk_report_working => en: "📈 Generating today's close report…", zh: "📈 開始產生今日收盤報告…";
     stk_report_already => en: "Today's report has already been sent.", zh: "今日報告已經送出過了。";
+    stk_ai_button => en: "🤖 AI read", zh: "🤖 AI 解讀";
+    stk_ai_working => en: "🤖 Generating AI commentary…", zh: "🤖 產生 AI 解讀中…";
+    stk_ai_unavailable => en: "AI commentary is not configured.", zh: "尚未設定 AI 解讀。";
+    stk_ai_failed => en: "AI commentary failed.", zh: "AI 解讀失敗。";
+    stk_ai_heading => en: "🤖 <b>AI commentary</b>", zh: "🤖 <b>AI 解讀</b>";
 }
 
 impl Lang {

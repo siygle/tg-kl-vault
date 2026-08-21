@@ -15,7 +15,7 @@ use flowerss_bot::{
     preview::{NoopPublisher, TelegraphPublisher},
     scheduler::{Scheduler, SchedulerOptions},
     stock::{StockService, StockWorker, TwOfficialSource, YahooSource},
-    tagging::{build_tagger, worker::TagWorker},
+    tagging::{build_tagger, mcp::McpClient, worker::TagWorker},
 };
 use teloxide::Bot;
 use tokio::sync::watch;
@@ -117,7 +117,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Fourth background task: the stock close-report worker. Its own 60s tick
     // and shutdown clone; shares the StockService Arc with the bot handlers.
-    let stock_worker = StockWorker::new(stock.clone(), TeloxideSender::new(bot.clone()));
+    // AI commentary reuses the bookmark MCP bridge, and only when both the
+    // stock toggle and the bridge are configured.
+    let stock_commentary = (config.stock.ai_commentary && config.bookmark.ai.mcp.is_configured())
+        .then(|| McpClient::new(fetcher.client().clone(), config.bookmark.ai.mcp.clone()));
+    let stock_worker = StockWorker::with_commentary(
+        stock.clone(),
+        TeloxideSender::new(bot.clone()),
+        stock_commentary,
+    );
     let stock_worker_rx = shutdown_rx.clone();
     let stock_worker_task =
         tokio::spawn(async move { stock_worker.run_until_shutdown(stock_worker_rx).await });

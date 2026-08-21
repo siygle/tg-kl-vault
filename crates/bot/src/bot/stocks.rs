@@ -51,6 +51,9 @@ pub mod cb {
     pub fn qadd(symbol: &str) -> String {
         format!("stk:qadd:{symbol}")
     }
+    pub fn qai(symbol: &str) -> String {
+        format!("stk:qai:{symbol}")
+    }
     pub fn ptoggle(market: crate::stock::Market) -> String {
         format!("stk:ptoggle:{}", market.as_wire())
     }
@@ -61,11 +64,12 @@ pub mod cb {
 
 // ─── Keyboards ───────────────────────────────────────────────────────────────
 
-fn quote_card_keyboard(symbol: &str, lang: Lang) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        lang.stk_add_button(),
-        cb::qadd(symbol),
-    )]])
+fn quote_card_keyboard(symbol: &str, ai_available: bool, lang: Lang) -> InlineKeyboardMarkup {
+    let mut row = vec![InlineKeyboardButton::callback(lang.stk_add_button(), cb::qadd(symbol))];
+    if ai_available {
+        row.push(InlineKeyboardButton::callback(lang.stk_ai_button(), cb::qai(symbol)));
+    }
+    InlineKeyboardMarkup::new(vec![row])
 }
 
 fn watchlist_keyboard(page: &WatchlistPage, lang: Lang) -> InlineKeyboardMarkup {
@@ -196,10 +200,11 @@ pub async fn handle_stock(
             return Ok(());
         }
     };
+    let ai_available = state.config.bookmark.ai.mcp.is_configured();
     bot.send_message(msg.chat.id, render_quote_card(&view, lang))
         .parse_mode(ParseMode::Html)
         .link_preview_options(no_preview())
-        .reply_markup(quote_card_keyboard(&sym.canonical, lang))
+        .reply_markup(quote_card_keyboard(&sym.canonical, ai_available, lang))
         .await?;
     Ok(())
 }
@@ -539,6 +544,7 @@ pub async fn handle_stock_callback(
             let reply = add_reply(state, chat_id.0, by, symbol, lang).await;
             toast(bot, query, &reply).await
         }
+        ["qai", symbol] => handle_ai(bot, query, state, symbol, chat_id, message_id, lang).await,
         ["ptoggle", market] => {
             let Some(market) = Market::from_wire(market) else {
                 return toast(bot, query, lang.stk_bad_action()).await;
@@ -567,6 +573,79 @@ pub async fn handle_stock_callback(
         }
         _ => toast(bot, query, lang.stk_bad_action()).await,
     }
+}
+
+/// 🤖 button: AI commentary for one symbol. Like the bookmark 📝 handler, we
+/// answer the callback immediately and do the slow agent turn in a spawned task
+/// that replies when ready — never blocking the ~15s callback budget.
+async fn handle_ai(
+    bot: &Bot,
+    query: &CallbackQuery,
+    state: &BotState,
+    symbol: &str,
+    chat_id: ChatId,
+    message_id: MessageId,
+    lang: Lang,
+) -> ResponseResult<()> {
+    if !state.config.bookmark.ai.mcp.is_configured() {
+        return toast(bot, query, lang.stk_ai_unavailable()).await;
+    }
+    let Parsed::Resolved(sym) = parse(symbol) else {
+        return toast(bot, query, lang.stk_bad_action()).await;
+    };
+
+    toast(bot, query, lang.stk_ai_working()).await?;
+
+    let client = crate::tagging::mcp::McpClient::new(
+        state.fetcher.client().clone(),
+        state.config.bookmark.ai.mcp.clone(),
+    );
+    let stock = state.stock.clone();
+    let now = now_unix();
+    let bot = bot.clone();
+    tokio::spawn(async move {
+        use crate::stock::commentary::{build_single_prompt, sanitize, SymbolBrief};
+        let reply = match stock.snapshot(&sym, now).await {
+            Ok(view) => {
+                let name = view
+                    .meta
+                    .as_ref()
+                    .map(|m| m.display_name.clone())
+                    .unwrap_or_else(|| sym.local_code.clone());
+                let change_pct = match (view.snapshot.last_close, view.snapshot.prev_close) {
+                    (Some(l), Some(p)) if p != 0.0 => Some((l - p) / p * 100.0),
+                    _ => None,
+                };
+                let brief = SymbolBrief {
+                    code: &sym.local_code,
+                    name: &name,
+                    close: view.snapshot.last_close,
+                    change_pct,
+                    signals: &view.signals,
+                };
+                match client.run(&build_single_prompt(&brief, lang)).await {
+                    Ok(text) if !text.trim().is_empty() => {
+                        let body = sanitize(&text);
+                        format!(
+                            "{}\n\n{}\n\n{}",
+                            lang.stk_ai_heading(),
+                            teloxide::utils::html::escape(&body),
+                            lang.stk_ai_disclaimer()
+                        )
+                    }
+                    _ => lang.stk_ai_failed().to_owned(),
+                }
+            }
+            Err(_) => lang.stk_ai_failed().to_owned(),
+        };
+        let _ = bot
+            .send_message(chat_id, reply)
+            .parse_mode(ParseMode::Html)
+            .link_preview_options(no_preview())
+            .reply_parameters(teloxide::types::ReplyParameters::new(message_id))
+            .await;
+    });
+    Ok(())
 }
 
 /// Handles a completed push-time ForceReply (from `runtime.rs`).
@@ -702,8 +781,12 @@ mod tests {
 
     #[test]
     fn quote_card_keyboard_uses_the_add_namespace() {
-        let kb = quote_card_keyboard(&card_symbol().canonical, Lang::ZhTw);
+        let kb = quote_card_keyboard(&card_symbol().canonical, false, Lang::ZhTw);
         let data = format!("{:?}", kb);
         assert!(data.contains("stk:qadd:2330.TW"));
+        assert!(!data.contains("stk:qai"), "no AI button when unconfigured");
+        // With AI available the 🤖 button appears.
+        let kb2 = quote_card_keyboard(&card_symbol().canonical, true, Lang::ZhTw);
+        assert!(format!("{kb2:?}").contains("stk:qai:2330.TW"));
     }
 }

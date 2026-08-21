@@ -88,15 +88,27 @@ fn market_index(market: Market) -> usize {
 pub struct StockWorker<Src: StockSource, Snd: MessageSender> {
     stock: std::sync::Arc<StockService<Src>>,
     sender: Snd,
+    /// Present only when AI commentary is enabled *and* the MCP bridge is
+    /// configured; otherwise reports send the numbers alone.
+    commentary: Option<crate::tagging::mcp::McpClient>,
     probe_cache: Mutex<[Option<(SessionMeta, i64)>; 2]>,
     sent_guard: Mutex<HashSet<(i64, Market, i64)>>,
 }
 
 impl<Src: StockSource, Snd: MessageSender> StockWorker<Src, Snd> {
     pub fn new(stock: std::sync::Arc<StockService<Src>>, sender: Snd) -> Self {
+        Self::with_commentary(stock, sender, None)
+    }
+
+    pub fn with_commentary(
+        stock: std::sync::Arc<StockService<Src>>,
+        sender: Snd,
+        commentary: Option<crate::tagging::mcp::McpClient>,
+    ) -> Self {
         Self {
             stock,
             sender,
+            commentary,
             probe_cache: Mutex::new([None, None]),
             sent_guard: Mutex::new(HashSet::new()),
         }
@@ -249,12 +261,26 @@ impl<Src: StockSource, Snd: MessageSender> StockWorker<Src, Snd> {
         }
 
         let lang = chat_lang(repo, chat_id).await;
-        let entries = self.stock.report_entries(chat_id, market, trade_date, now).await?;
+        let mut entries = self.stock.report_entries(chat_id, market, trade_date, now).await?;
         if entries.is_empty() {
             // Nothing to report (all symbols removed since the chat list query).
             // Stamp the day so we don't reclaim it every stale window.
             repo.mark_report_sent(chat_id, market.as_wire(), trade_date).await?;
             return Ok(());
+        }
+
+        // Optional AI commentary — never on the critical path: any failure or
+        // timeout leaves the numbers untouched.
+        if cfg.ai_commentary {
+            if let Some(client) = &self.commentary {
+                if let Err(err) = super::commentary::annotate_entries(
+                    client, repo, lang, trade_date, &mut entries, cfg,
+                )
+                .await
+                {
+                    warn!(chat_id, error = %err, "stock commentary annotate failed");
+                }
+            }
         }
 
         let chunks = render_report_chunks(market, trade_date, &entries, late, lang);

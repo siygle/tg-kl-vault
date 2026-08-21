@@ -8,6 +8,7 @@
 
 pub mod bars;
 pub mod clock;
+pub mod commentary;
 pub mod indicators;
 pub mod render;
 pub mod service;

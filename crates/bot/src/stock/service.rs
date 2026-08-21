@@ -580,6 +580,7 @@ fn entry_from_view(sym: &Symbol, item: &WatchItem, view: QuoteView) -> ReportEnt
         .map(|m| (m.week52_high, m.week52_low))
         .unwrap_or((None, None));
     ReportEntry {
+        canonical: sym.canonical.clone(),
         local_code: sym.local_code.clone(),
         display_name: display_name_for(item, view.meta.as_ref()),
         snapshot: view.snapshot,
@@ -587,6 +588,7 @@ fn entry_from_view(sym: &Symbol, item: &WatchItem, view: QuoteView) -> ReportEnt
         week52_high: w52h,
         week52_low: w52l,
         indicators_unavailable: false,
+        commentary: None,
     }
 }
 
@@ -603,6 +605,7 @@ fn fallback_entry(item: &WatchItem, sym: &Symbol, bar: &TwBar) -> ReportEntry {
         ..Snapshot::default()
     };
     ReportEntry {
+        canonical: sym.canonical.clone(),
         local_code: sym.local_code.clone(),
         display_name: display_name_for(item, None),
         snapshot,
@@ -611,6 +614,7 @@ fn fallback_entry(item: &WatchItem, sym: &Symbol, bar: &TwBar) -> ReportEntry {
         week52_low: None,
         // Only a single fallback close: never render a partial indicator block.
         indicators_unavailable: true,
+        commentary: None,
     }
 }
 
