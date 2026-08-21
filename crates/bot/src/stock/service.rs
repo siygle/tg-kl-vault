@@ -19,10 +19,11 @@ use crate::db::stocks::NewWatch;
 use crate::ratelimit::MinIntervalLimiter;
 
 use super::bars::{Bar, Series};
-use super::clock::{market_date_string, market_day};
+use super::clock::{market_date_string, market_day, SessionMeta};
 use super::indicators::{self, Snapshot};
+use super::render::ReportEntry;
 use super::signals::{self, Signal};
-use super::source::{classify_source_error, SourceError, StockSource, TwOfficialSource};
+use super::source::{classify_source_error, SourceError, StockSource, TwBar, TwOfficialSource};
 use super::symbol::{self, Board, Market, Parsed, Symbol};
 
 /// Politeness gate for upstream calls. The worker paces its own batch loop on
@@ -357,6 +358,51 @@ impl<S: StockSource> StockService<S> {
         Ok(bars.iter().map(to_bar).collect())
     }
 
+    /// Fetches the probe/symbol's current session clock, caching the series as a
+    /// side effect. Used by the worker to classify the market state each pass.
+    pub async fn fetch_session_meta(&self, sym: &Symbol) -> anyhow::Result<SessionMeta> {
+        let series = self.guarded_series(sym).await?;
+        let meta = series.session_meta();
+        self.cache_series(sym, &series).await?;
+        Ok(meta)
+    }
+
+    /// Builds one report entry per watched symbol for a chat/market. Each symbol
+    /// is served cache-first via `snapshot`; a TW symbol with no usable Yahoo
+    /// data falls back to the official dump **only when the dump's date matches**
+    /// `trade_date`, with the indicator block suppressed (a partial history would
+    /// produce confidently-wrong averages).
+    pub async fn report_entries(
+        &self,
+        chat_id: i64,
+        market: Market,
+        trade_date: &str,
+        now: i64,
+    ) -> anyhow::Result<Vec<ReportEntry>> {
+        let items = self.repo.watch_for_chat_market(chat_id, market.as_wire()).await?;
+        let mut out = Vec::new();
+        for item in items {
+            let Parsed::Resolved(sym) = symbol::parse(&item.symbol) else {
+                continue;
+            };
+            match self.snapshot(&sym, now).await {
+                Ok(view) if view.snapshot.last_close.is_some() => {
+                    out.push(entry_from_view(&sym, &item, view));
+                    continue;
+                }
+                _ => {}
+            }
+            if market == Market::Tw {
+                if let Some(fb) = &self.tw_fallback {
+                    if let Ok(Some(bar)) = fb.fallback_quote(&sym, trade_date).await {
+                        out.push(fallback_entry(&item, &sym, &bar));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub(crate) async fn load_bars(&self, canonical: &str) -> anyhow::Result<Vec<Bar>> {
         let bars = self
             .repo
@@ -517,6 +563,54 @@ fn tw_candidate(local_code: &str, board: Board) -> Symbol {
         market: Market::Tw,
         board,
         local_code: local_code.to_owned(),
+    }
+}
+
+fn display_name_for<'a>(item: &'a WatchItem, meta: Option<&'a StockMeta>) -> String {
+    if !item.display_name.is_empty() {
+        return item.display_name.clone();
+    }
+    meta.map(|m| m.display_name.clone()).unwrap_or_default()
+}
+
+fn entry_from_view(sym: &Symbol, item: &WatchItem, view: QuoteView) -> ReportEntry {
+    let (w52h, w52l) = view
+        .meta
+        .as_ref()
+        .map(|m| (m.week52_high, m.week52_low))
+        .unwrap_or((None, None));
+    ReportEntry {
+        local_code: sym.local_code.clone(),
+        display_name: display_name_for(item, view.meta.as_ref()),
+        snapshot: view.snapshot,
+        signals: view.signals,
+        week52_high: w52h,
+        week52_low: w52l,
+        indicators_unavailable: false,
+    }
+}
+
+fn fallback_entry(item: &WatchItem, sym: &Symbol, bar: &TwBar) -> ReportEntry {
+    let prev_close = match (bar.close, bar.change) {
+        (Some(c), Some(ch)) => Some(c - ch),
+        _ => None,
+    };
+    let snapshot = Snapshot {
+        bars_used: 1,
+        last_close: bar.close,
+        prev_close,
+        last_volume: bar.volume,
+        ..Snapshot::default()
+    };
+    ReportEntry {
+        local_code: sym.local_code.clone(),
+        display_name: display_name_for(item, None),
+        snapshot,
+        signals: Vec::new(),
+        week52_high: None,
+        week52_low: None,
+        // Only a single fallback close: never render a partial indicator block.
+        indicators_unavailable: true,
     }
 }
 

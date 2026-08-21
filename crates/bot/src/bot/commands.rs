@@ -60,6 +60,8 @@ pub enum Command {
     Stockadd(String),
     #[command(description = "設定收盤推播")]
     Stockpush(String),
+    #[command(description = "立刻產生今日收盤報告")]
+    Stockreport,
     // Hidden: the real delete UI is the 🗑 button; this is for power users.
     #[command(description = "")]
     Stockdel(String),
@@ -134,6 +136,7 @@ mod tests {
         assert!(pos("stock") < pos("stocks"));
         assert!(pos("stocks") < pos("stockadd"));
         assert!(pos("stockadd") < pos("stockpush"));
-        assert!(pos("stockpush") < pos("stockdel"));
+        assert!(pos("stockpush") < pos("stockreport"));
+        assert!(pos("stockreport") < pos("stockdel"));
     }
 }

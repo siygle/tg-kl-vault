@@ -14,7 +14,7 @@ use flowerss_bot::{
     feed::fetch::Fetcher,
     preview::{NoopPublisher, TelegraphPublisher},
     scheduler::{Scheduler, SchedulerOptions},
-    stock::{StockService, TwOfficialSource, YahooSource},
+    stock::{StockService, StockWorker, TwOfficialSource, YahooSource},
     tagging::{build_tagger, worker::TagWorker},
 };
 use teloxide::Bot;
@@ -105,14 +105,33 @@ async fn main() -> anyhow::Result<()> {
         config.stock.clone(),
     ));
 
+    // Embedded-replica reads can lag ~60s, so two instances against one Turso DB
+    // could each send the daily close report inside that sync window. A
+    // distributed lock would be half-correct; an honest warning is cheaper.
+    if config.stock.enabled && repo.db().is_remote() {
+        tracing::warn!(
+            "embedded replica mode (TURSO_DATABASE_URL) is set: run only ONE instance, or a \
+             second instance may duplicate each daily stock report within the 60s sync window"
+        );
+    }
+
+    // Fourth background task: the stock close-report worker. Its own 60s tick
+    // and shutdown clone; shares the StockService Arc with the bot handlers.
+    let stock_worker = StockWorker::new(stock.clone(), TeloxideSender::new(bot.clone()));
+    let stock_worker_rx = shutdown_rx.clone();
+    let stock_worker_task =
+        tokio::spawn(async move { stock_worker.run_until_shutdown(stock_worker_rx).await });
+
     let bot_rx = shutdown_rx.clone();
     let bot_task =
         tokio::spawn(async move { run_bot(bot, config, repo, fetcher, stock, bot_rx).await });
 
-    let (scheduler_result, worker_result, bot_result) =
-        tokio::try_join!(scheduler_task, worker_task, bot_task).context("join tasks")?;
+    let (scheduler_result, worker_result, stock_worker_result, bot_result) =
+        tokio::try_join!(scheduler_task, worker_task, stock_worker_task, bot_task)
+            .context("join tasks")?;
     scheduler_result.context("run scheduler")?;
     worker_result.context("run tag worker")?;
+    stock_worker_result.context("run stock worker")?;
     bot_result.context("run bot")?;
     signal_task.abort();
     Ok(())

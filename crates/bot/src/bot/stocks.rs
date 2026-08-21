@@ -16,11 +16,12 @@ use tracing::warn;
 
 use crate::bot::i18n::Lang;
 use crate::bot::runtime::{
-    chat_lang, no_preview, now_unix, send_force_reply_prompt, BotState,
+    chat_lang, no_preview, now_unix, send_force_reply_prompt, to_request_error, BotState,
 };
 use crate::stock::render::{render_quote_card, render_watchlist};
 use crate::stock::{
-    parse, AddError, Market, MarketScope, Parsed, StockService, WatchlistPage, YahooSource,
+    classify_session, manual_report_day, market_date_string, parse, render_report_chunks, AddError,
+    Market, MarketScope, Parsed, StockService, WatchlistPage, YahooSource,
 };
 
 /// The concrete service type shared by the bot and the worker.
@@ -365,6 +366,84 @@ fn parse_hhmm(s: &str) -> Option<i64> {
         Some(h * 60 + m)
     } else {
         None
+    }
+}
+
+/// `/stockreport` — produce today's close report now (shares the ledger with
+/// the worker, so a manual run suppresses that evening's automatic push).
+pub async fn handle_stockreport(bot: &Bot, msg: &Message, state: &BotState) -> ResponseResult<()> {
+    let lang = chat_lang(&state.repo, msg.chat.id.0).await;
+    let chat_id = msg.chat.id.0;
+    let now = now_unix();
+    let repo = state.stock.repo();
+
+    bot.send_message(msg.chat.id, lang.stk_report_working()).await?;
+
+    let mut produced_any = false;
+    for market in [Market::Tw, Market::Us] {
+        let scope = if market == Market::Tw { MarketScope::Tw } else { MarketScope::Us };
+        let page = state.stock.list_page(chat_id, scope, 0).await.map_err(req_err)?;
+        if page.total == 0 {
+            continue;
+        }
+        produced_any = true;
+
+        let Some(probe) = probe_symbol(state, market) else {
+            continue;
+        };
+        let meta = match state.stock.fetch_session_meta(&probe).await {
+            Ok(meta) => meta,
+            Err(err) => {
+                warn!(?market, error = %err, "stockreport probe failed");
+                bot.send_message(msg.chat.id, lang.stk_upstream()).await?;
+                continue;
+            }
+        };
+        let Some(trading_day) = manual_report_day(classify_session(now, meta)) else {
+            bot.send_message(msg.chat.id, lang.stk_report_not_closed(market)).await?;
+            continue;
+        };
+        let trade_date = market_date_string(trading_day);
+
+        // Share the worker's ledger: claim once (at-most-once), which also
+        // suppresses tonight's automatic push for the same trading day.
+        if !repo
+            .claim_report(chat_id, market.as_wire(), &trade_date, now, 1800, 3)
+            .await
+            .map_err(to_request_error)?
+        {
+            bot.send_message(msg.chat.id, lang.stk_report_already()).await?;
+            continue;
+        }
+        let entries = state
+            .stock
+            .report_entries(chat_id, market, &trade_date, now)
+            .await
+            .map_err(req_err)?;
+        for chunk in render_report_chunks(market, &trade_date, &entries, false, lang) {
+            bot.send_message(msg.chat.id, chunk)
+                .parse_mode(ParseMode::Html)
+                .link_preview_options(no_preview())
+                .await?;
+        }
+        repo.mark_report_sent(chat_id, market.as_wire(), &trade_date).await.map_err(to_request_error)?;
+    }
+
+    if !produced_any {
+        bot.send_message(msg.chat.id, lang.stk_empty()).await?;
+    }
+    Ok(())
+}
+
+/// Builds the probe `Symbol` for a market from config (no network).
+fn probe_symbol(state: &BotState, market: Market) -> Option<crate::stock::Symbol> {
+    let raw = match market {
+        Market::Tw => &state.config.stock.tw_probe_symbol,
+        Market::Us => &state.config.stock.us_probe_symbol,
+    };
+    match parse(raw) {
+        Parsed::Resolved(sym) => Some(sym),
+        _ => None,
     }
 }
 

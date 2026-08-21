@@ -12,7 +12,7 @@
 
 /// Which schedule bucket a symbol belongs to. Wire form (`callback_data`, DB
 /// `market` column): `"tw"` | `"us"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Market {
     Tw,
     Us,

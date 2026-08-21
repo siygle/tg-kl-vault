@@ -159,6 +159,8 @@ strings! {
     stk_push_saved => en: "Saved.", zh: "已儲存。";
     stk_push_bad_time => en: "Use HH:MM (00:00–23:59) or \"off\".", zh: "請輸入 HH:MM（00:00–23:59）或「off」。";
     stk_push_time_default => en: "after close", zh: "收盤後";
+    stk_report_working => en: "📈 Generating today's close report…", zh: "📈 開始產生今日收盤報告…";
+    stk_report_already => en: "Today's report has already been sent.", zh: "今日報告已經送出過了。";
 }
 
 impl Lang {
@@ -288,6 +290,14 @@ impl Lang {
         match self {
             Self::En => format!("…and {more} more, see /stocks"),
             Self::ZhTw => format!("…及其他 {more} 檔，見 /stocks"),
+        }
+    }
+
+    pub fn stk_report_not_closed(self, market: crate::stock::Market) -> String {
+        let name = self.stk_market_name(market);
+        match self {
+            Self::En => format!("The {name} market hasn't closed yet — try again after the close."),
+            Self::ZhTw => format!("{name}尚未收盤，請於收盤後再試。"),
         }
     }
 

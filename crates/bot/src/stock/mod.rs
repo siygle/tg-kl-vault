@@ -14,6 +14,7 @@ pub mod service;
 pub mod signals;
 pub mod source;
 pub mod symbol;
+pub mod worker;
 
 pub use bars::{bar_is_sane, Bar, Quote, Series};
 pub use clock::{
@@ -28,3 +29,4 @@ pub use service::{
 pub use signals::{detect, Signal};
 pub use source::{classify_source_error, SourceError, StockSource, TwOfficialSource, YahooSource};
 pub use symbol::{parse, Board, Market, Parsed, Symbol};
+pub use worker::{manual_report_day, render_report_chunks, StockWorker};

@@ -164,6 +164,7 @@ async fn handle_command(
         Command::Stockpush(payload) => {
             stocks::handle_stockpush(&bot, &msg, &state, payload.trim()).await?
         }
+        Command::Stockreport => stocks::handle_stockreport(&bot, &msg, &state).await?,
         Command::Stockdel(payload) => {
             stocks::handle_stockdel(&bot, &msg, &state, payload.trim()).await?
         }
