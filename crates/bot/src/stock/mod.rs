@@ -10,6 +10,7 @@ pub mod bars;
 pub mod clock;
 pub mod indicators;
 pub mod signals;
+pub mod source;
 pub mod symbol;
 
 pub use bars::{bar_is_sane, Bar, Quote, Series};
@@ -19,4 +20,5 @@ pub use clock::{
 };
 pub use indicators::{snapshot, Snapshot, MIN_BARS_FOR_INDICATORS};
 pub use signals::{detect, Signal};
+pub use source::{classify_source_error, SourceError, StockSource, YahooSource};
 pub use symbol::{parse, Board, Market, Parsed, Symbol};
