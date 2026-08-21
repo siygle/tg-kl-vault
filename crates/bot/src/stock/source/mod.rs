@@ -2,8 +2,11 @@
 //! `#[allow(async_fn_in_trait)]` trait (desugars to RPITIT, not dyn-compatible),
 //! plus an enum for runtime dispatch — never `Box<dyn>`.
 
+pub mod roc;
+pub mod tw_official;
 pub mod yahoo;
 
+pub use tw_official::{TwBar, TwOfficialSource};
 pub use yahoo::YahooSource;
 
 use super::bars::Series;
